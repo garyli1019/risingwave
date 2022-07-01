@@ -134,7 +134,6 @@ macro_rules! commit_multi_var {
 #[derive(Default)]
 struct Versioning {
     current_version_id: CurrentHummockVersionId,
-    checkpoint_version_id: HummockVersionId,
     // TODO #2065: split levels by compaction group id in `HummockVersion`
     hummock_versions: BTreeMap<HummockVersionId, HummockVersion>,
     hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
@@ -266,13 +265,9 @@ where
             init_version.insert(self.env.meta_store()).await?;
         }
 
-        versioning_guard.checkpoint_version_id = *version_ids.first().unwrap();
-        let mut redo_state = HummockVersion::select(
-            self.env.meta_store(),
-            &versioning_guard.checkpoint_version_id,
-        )
-        .await?
-        .unwrap();
+        let mut redo_state = HummockVersion::select(self.env.meta_store(), &0)
+            .await?
+            .unwrap();
         versioning_guard
             .hummock_versions
             .insert(redo_state.id, redo_state.clone());
@@ -1169,7 +1164,7 @@ where
     }
 
     pub async fn proceed_version_checkpoint(&self) -> risingwave_common::error::Result<()> {
-        let mut versioning_guard = self.versioning.write().await;
+        let versioning_guard = self.versioning.read().await;
         let new_checkpoint = versioning_guard
             .hummock_versions
             .first_key_value()
@@ -1177,12 +1172,6 @@ where
             .1
             .clone();
         new_checkpoint.insert(self.env.meta_store()).await?;
-        HummockVersion::delete(
-            self.env.meta_store(),
-            &versioning_guard.checkpoint_version_id,
-        )
-        .await?;
-        versioning_guard.checkpoint_version_id = new_checkpoint.id;
         Ok(())
     }
 
